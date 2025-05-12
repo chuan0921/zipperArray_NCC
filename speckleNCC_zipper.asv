@@ -4,7 +4,7 @@ function speckleNCC_zipper()
         'num_iterations', 10, ...        % 幀數
         'fx', 5e6, ...
         'c', 1540, ...
-        'dt', 1/100, ...                 % 幀間時間 (秒)
+        'dt', 1/100, ...                % 幀間時間 (秒)
         'Vmax', 25, ...                  % 最大速度 mm/s
         'num_scatterers', 5000, ...
         'vessel_radius', 5, ...
@@ -16,7 +16,7 @@ function speckleNCC_zipper()
         'dz', 0.05, ...
         'dx', 0.05, ...
         'zipper_num', 4, ...            % (先不用)Zipper 元件數
-        'zipper_pitch', 3, ...          % mm
+        'zipper_pitch', 3, ...       % mm
         'zipper_width', 0.3, ...
         'zipper_height', 6, ...
         'zipper_gap', 0.01 ...
@@ -36,7 +36,8 @@ function speckleNCC_zipper()
            0, 0, 0;
     ];
     rng(42);   % 固定scatter
-    num_repeat = 1;    % 跑20次不同 speckle樣本
+    % rng('default');  % 不固定scatter
+    num_repeat = 1;  % 跑20次不同 speckle樣本
     [X, Z, x, z] = buildMeshgrid(settings);
     
     num_moved = settings.num_iterations - 1;
@@ -81,7 +82,6 @@ function speckleNCC_zipper()
         fprintf('最佳匹配：第 %d 幀 (NCC=%.3f)，位移=%.3f mm，速度=%.3f mm/s\n', ...
                 best_frame, best_ncc, best_dy, best_vel);
         dy_peak(trial) = best_dy;
-
         disp(displacement_all);
         disp(ncc_all);
         disp("左元件座標：");
@@ -90,19 +90,6 @@ function speckleNCC_zipper()
         disp(zipper_data(2, 2:4));
         fprintf("真實位移 per frame: %.2f mm\n", settings.Vmax * settings.dt);
         fprintf("幀數: %d\n", settings.num_iterations);
-        %% 驗證scatter流動位置
-        fprintf('\n--- 散射粒子 Y 座標驗證 (Trial %d, Best Frame %d) ---\n', trial, best_frame);
-        [~, sy_at_best_idx_step, ~, ~] = updateScatterers(sx, sy, sz, amp, settings, best_idx);
-
-        y_center_right_element = zipper_data(2,3); % 右元件的 Y 中心
-        
-        fprintf('在 Best Frame (對應 %d 個 dt 的移動後):\n', best_idx);
-        fprintf('  右元件 Y 中心目標: %.4f mm\n', y_center_right_element);
-        fprintf('  此時散射粒子 Y 座標平均值: %.4f mm\n', mean(sy_at_best_idx_step));
-        fprintf('  此時散射粒子 Y 座標標準差: %.4f mm\n', std(sy_at_best_idx_step));
-        fprintf('  此時散射粒子 Y 座標最小值: %.4f mm\n', min(sy_at_best_idx_step));
-        fprintf('  此時散射粒子 Y 座標最大值: %.4f mm\n', max(sy_at_best_idx_step));
-        fprintf('  此時散射粒子數量: %d\n', numel(sy_at_best_idx_step));
     end
     %% NCC vs y displacement
     figure;
@@ -142,6 +129,26 @@ function speckleNCC_zipper()
     imagesc(x, z, original_image); colormap gray; colorbar;
     xlabel('Lateral (mm)'); ylabel('Axial (mm)'); axis image;
     rectangle('Position', [(x(kx)), (z(kz)), kernel_w * settings.dx, kernel_h * settings.dz], 'EdgeColor', 'r', 'LineWidth', 1.5);
+
+    %% 繪製 Y 座標直方圖
+    figure('Name', sprintf('Scatter Y Distribution at Best Frame (%d)', best_frame));
+    histogram(sy_at_best_frame, 50); % 50 個 bin
+    hold on;
+    plot([zipper_data(2, 3), zipper_data(2, 3)], ylim, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Right Element Y-Center');
+    plot([settings.zipper_height/2, settings.zipper_height/2], ylim, 'k:', 'DisplayName', 'Y Upper Bound');
+    plot([-settings.zipper_height/2, -settings.zipper_height/2], ylim, 'k:', 'DisplayName', 'Y Lower Bound');
+    xlabel('Scatterer Y Position (mm)');
+    ylabel('Count');
+    title(sprintf('Y Distribution at Frame %d (Total Y Shift = %.2f mm)', best_frame, best_dy));
+    legend('show');
+    grid on;
+    hold off;
+    %% 檢查有多少比例的粒子 Y 座標接近右元件中心
+    tolerance = 0.1; % mm, 例如 +/- 0.1mm
+    particles_near_right_element_y = sum(abs(sy_at_best_frame - zipper_data(2,3)) <= tolerance);
+    fprintf('  在 +/- %.2fmm 容差內，接近右元件 Y 中心的粒子數: %d (%.2f%%)\n', ...
+        tolerance, particles_near_right_element_y, particles_near_right_element_y/numel(sy_at_best_frame)*100);
+
 end
 function [X, Z, x, z] = buildMeshgrid(settings)
     x = -settings.x_size/2 : settings.dx : settings.x_size/2;
@@ -251,8 +258,9 @@ function img = generateZipperImage(sx, sy, sz, amp, tx_list, rx_list, s, X, Z, z
 
     envelope = abs(hilbert(flowField));
     envelope_norm = envelope / max(envelope(:));
-    envelope_db = 20 * log10(envelope_norm); % 對數轉換＋閾值處理 
-    img = max(envelope_db, -50);
+    % envelope_db = 20 * log10(envelope_norm); % 對數轉換＋閾值處理 
+    % img = max(envelope_db, -50);
+    img = envelope_norm;  % 線性正規化
 end
 function [disp_vec, cc_max, matched_block_pos] = calculateMatchedBlock_3D(orig_img, moved_img, k_block, window_w, window_h, s, iter, x, z)
     x0 = k_block(1); z0 = k_block(2);

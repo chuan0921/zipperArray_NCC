@@ -1,4 +1,4 @@
-function speckleNCC_zipper()
+function speckleNCC_zipper_uniqueID()
     %% 初始化參數
     settings = struct(...
         'num_iterations', 10, ...        % 幀數
@@ -15,26 +15,23 @@ function speckleNCC_zipper()
         'x_size', 10, ...
         'dz', 0.05, ...
         'dx', 0.05, ...
-        'zipper_num', 4, ...            % (先不用)Zipper 元件數
+        'zipper_num', 2, ...            % (先不用)Zipper 元件數
         'zipper_pitch', 3, ...          % mm
         'zipper_width', 0.3, ...
         'zipper_height', 6, ...
-        'zipper_gap', 0.01 ...
+        'gap', 0.01 ...
     );
     zipper_data = [...
-        1, settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2 - 2e-3, 0, ...
-           settings.zipper_gap/2, (-settings.zipper_height - settings.zipper_gap)/2, 0, ...
-           settings.zipper_gap/2 + settings.zipper_width, (-settings.zipper_height - settings.zipper_gap)/2, 0, ...
-           settings.zipper_width + settings.zipper_gap/2, (-settings.zipper_width - settings.zipper_gap)/2 + 2e-3, 0, ...
-           1, settings.zipper_width, settings.zipper_height + settings.zipper_gap, ...
-           0, 0, 0;  % 共18個數據 + 1個 id
-        2, settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2, 0, ...
-           settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2 - 2e-3, 0, ...
-           settings.zipper_width + settings.zipper_gap/2, (-settings.zipper_width - settings.zipper_gap)/2 + 2e-3, 0, ...
-           settings.zipper_gap/2 + settings.zipper_width, (settings.zipper_width + settings.zipper_gap)/2, 0, ...
-           1, settings.zipper_width, settings.zipper_width + settings.zipper_gap, ...
-           0, 0, 0;
+        1, settings.gap/2, (6e-3+settings.gap)/2 - (2e-3), 0, settings.gap/2, (-6e-3-settings.gap)/2, 0, settings.gap/2 + 0.3e-3, (-6e-3-settings.gap)/2, 0, 0.3e-3 + settings.gap/2, (-6e-3-settings.gap)/2 + (2e-3), 0, 1, 0.3e-3, 6e-3+settings.gap, 0, 0, 0;...
+        2, settings.gap/2, (6e-3+settings.gap)/2, 0, settings.gap/2, (6e-3+settings.gap)/2 - (2e-3), 0, 0.3e-3 + settings.gap/2, (-6e-3-settings.gap)/2 + (2e-3), 0, settings.gap/2 + 0.3e-3, (6e-3+settings.gap)/2, 0, 1, 0.3e-3, 6e-3+settings.gap, 0, 0, 0;
     ];
+    % element_centers = zeros(settings.zipper_num, 3);
+    % for i = 1:settings.zipper_num
+    %     x_coords = [zipper_data(i,2), zipper_data(i,5), zipper_data(i,8), zipper_data(i,11)];
+    %     y_coords = [zipper_data(i,3), zipper_data(i,6), zipper_data(i,9), zipper_data(i,12)];
+    %     z_coords = [zipper_data(i,4), zipper_data(i,7), zipper_data(i,10), zipper_data(i,13)];
+    %     element_centers(i,:) = [mean(x_coords), mean(y_coords), mean(z_coords)];
+    % end
     rng(42);   % 固定scatter
     num_repeat = 1;    % 跑20次不同 speckle樣本
     [X, Z, x, z] = buildMeshgrid(settings);
@@ -48,8 +45,8 @@ function speckleNCC_zipper()
     for trial = 1:num_repeat
         fprintf('第 %d 次模擬...\n', trial);
 
-        [sx, sy, sz, amp] = genScatters(settings);
-        sx_iter = sx; sy_iter = sy; sz_iter = sz;
+        [sx, sy, sz, amp,s_ids] = genScatters(settings);
+        sx_iter = sx; sy_iter = sy; sz_iter = sz; amp_iter = amp; s_ids_iter = s_ids;
 
         num_sub_elements = size(zipper_data, 1);
         tx_list_left = 1:2:num_sub_elements;
@@ -57,7 +54,7 @@ function speckleNCC_zipper()
         tx_list_right = 2:2:num_sub_elements;
         rx_list_right = 2:2:num_sub_elements;
 
-        [original_image, moved_images] = generateAllImages(sx_iter, sy_iter, sz_iter, amp, tx_list_left, rx_list_left, tx_list_right, rx_list_right, settings, X, Z,zipper_data);
+        [original_image, moved_images] = generateAllImages(sx_iter, sy_iter, sz_iter, amp_iter, s_ids_iter, tx_list_left, rx_list_left, tx_list_right, rx_list_right, settings, X, Z,zipper_data);
 
         kernel_w = round(6 / settings.dx);
         kernel_h = round(6 / settings.dz);
@@ -84,25 +81,11 @@ function speckleNCC_zipper()
 
         disp(displacement_all);
         disp(ncc_all);
-        disp("左元件座標：");
-        disp(zipper_data(1, 2:4));
-        disp("右元件座標：");
-        disp(zipper_data(2, 2:4));
+        % disp("左元件座標：");
+        % disp(element_centers);
+        % disp("右元件座標：");
+        % disp(element_centers);
         fprintf("真實位移 per frame: %.2f mm\n", settings.Vmax * settings.dt);
-        fprintf("幀數: %d\n", settings.num_iterations);
-        %% 驗證scatter流動位置
-        fprintf('\n--- 散射粒子 Y 座標驗證 (Trial %d, Best Frame %d) ---\n', trial, best_frame);
-        [~, sy_at_best_idx_step, ~, ~] = updateScatterers(sx, sy, sz, amp, settings, best_idx);
-
-        y_center_right_element = zipper_data(2,3); % 右元件的 Y 中心
-        
-        fprintf('在 Best Frame (對應 %d 個 dt 的移動後):\n', best_idx);
-        fprintf('  右元件 Y 中心目標: %.4f mm\n', y_center_right_element);
-        fprintf('  此時散射粒子 Y 座標平均值: %.4f mm\n', mean(sy_at_best_idx_step));
-        fprintf('  此時散射粒子 Y 座標標準差: %.4f mm\n', std(sy_at_best_idx_step));
-        fprintf('  此時散射粒子 Y 座標最小值: %.4f mm\n', min(sy_at_best_idx_step));
-        fprintf('  此時散射粒子 Y 座標最大值: %.4f mm\n', max(sy_at_best_idx_step));
-        fprintf('  此時散射粒子數量: %d\n', numel(sy_at_best_idx_step));
     end
     %% NCC vs y displacement
     figure;
@@ -149,7 +132,7 @@ function [X, Z, x, z] = buildMeshgrid(settings)
     [X, Z] = meshgrid(x, z);
 end
 
-function [sx, sy, sz, amp] = genScatters(s)
+function [sx, sy, sz, amp, s_ids] = genScatters(s)
     max_trials = s.num_scatterers * 10;  % 嘗試上限
     points = zeros(max_trials, 3);
     count = 0;
@@ -168,12 +151,13 @@ function [sx, sy, sz, amp] = genScatters(s)
     sx = points(1:count, 1);
     sy = points(1:count, 2);
     sz = points(1:count, 3);
-    amp = sqrt(-2 * log(rand(count, 1)));  % Rayleigh 分布
+    amp = sqrt(-2 * log(rand(count, 1)));   % Rayleigh 分布
+    s_ids = (1:count)';                     % 為初始粒子分配 ID (從1到count)
 end
 
-function [sx, sy, sz, amp] = updateScatterers(sx, sy, sz, amp, s ,step)
+function [sx, sy, sz, amp, s_ids] = updateScatterers(sx, sy, sz, amp,s_ids, s ,step)
     % 固定 scatter 模式 + y 方向流動
-    if nargin < 6
+    if nargin < 7
         step = 1;  % 預設每次只移動一幀
     end
     vy = s.Vmax * ones(size(sy));          % 每個點都以最大速度往 y 方向移動
@@ -185,6 +169,7 @@ function [sx, sy, sz, amp] = updateScatterers(sx, sy, sz, amp, s ,step)
     sy = sy(inside_idx);
     sz = sz(inside_idx);
     amp = amp(inside_idx);
+    s_ids = s_ids(inside_idx); % 同步篩選 ID
 
     % 若 scatterers 不足則補進新 speckle（補在 sy = -zipper_height/2 附近）
     num_new = s.num_scatterers - numel(sx);
@@ -198,53 +183,104 @@ function [sx, sy, sz, amp] = updateScatterers(sx, sy, sz, amp, s ,step)
         sz = [sz; new_sz];
         new_amp = sqrt(-2 * log(rand(num_new,1)));
         amp = [amp; new_amp];
+
+        % 為新粒子分配新的唯一 ID
+        max_id = 0;
+        if ~isempty(s_ids)
+            max_id = max(s_ids);
+        end
+        new_ids = (max_id + 1 : max_id + num_new)';
+        s_ids = [s_ids; new_ids];
     end
 end
-function [original_image, moved_images] = generateAllImages(sx, sy, sz, amp, tx_list_left, rx_list_left, tx_list_right, rx_list_right, settings, X, Z, zipper_data)
+function [original_image, moved_images] = generateAllImages(sx, sy, sz, amp, s_ids, tx_list_left, rx_list_left, tx_list_right, rx_list_right, settings, X, Z, zipper_data)
     image_h = size(Z, 1);
     image_w = size(Z, 2);
     moved_images = cell(1, settings.num_iterations);
+    y_center_left_element = 0.0;  % 左元件從 y=0 開始
+    y_center_right_element = y_center_left_element + settings.zipper_pitch; % 右元件跟左元件的中心距離＝pitch
 
     % 左元件收 Frame 1（原始影像）
-    fprintf('模擬影像第 1 幀（左元件）\n');
-    img_left = generateZipperImage(sx, sy, sz, amp, tx_list_left, rx_list_left, settings, X, Z, zipper_data);
+    fprintf('模擬影像第 1 幀（左元件），使用 Y 中心: %.4f mm\n', y_center_left_element);
+    img_left = generateZipperImage(sx, sy, sz, amp, tx_list_left, rx_list_left, settings, X, Z, zipper_data, y_center_left_element);
     original_image = imresize(img_left, [image_h, image_w]);
-    moved_images{1} = original_image;
+    % moved_images{1} = original_image;
     % 右元件收後續幀（模擬 speckle 往 y 軸移動）
-    for iter = 2:settings.num_iterations
-        fprintf('模擬影像第 %d 幀（右元件）\n', iter);
-        [sx, sy, sz, amp] = updateScatterers(sx, sy, sz, amp, settings, iter - 1);
-        img_right = generateZipperImage(sx, sy, sz, amp, tx_list_right, rx_list_right, settings, X, Z, zipper_data);
+    for iter = 1:settings.num_iterations
+        fprintf('模擬影像第 %d 幀（右元件），使用 Y 中心: %.4f mm\n', iter, y_center_right_element);
+        [sx, sy, sz, amp,s_ids] = updateScatterers(sx, sy, sz, amp,s_ids, settings, iter - 1);
+        img_right = generateZipperImage(sx, sy, sz, amp, tx_list_right, rx_list_right, settings, X, Z, zipper_data, y_center_right_element);
         moved_images{iter} = imresize(img_right, [image_h, image_w]);
     end
 end
-function img = generateZipperImage(sx, sy, sz, amp, tx_list, rx_list, s, X, Z, zipper_data)
+function img = generateZipperImage(sx, sy, sz, amp, tx_list, rx_list, s, X, Z, zipper_data, element_y_center)
     sigma_x = 0.3; sigma_z = 0.3; sigma_y0 = 0.5; alpha = 0.05;
     z_size = max(Z(:)); z_focal = z_size / 2;
     sigma_y = sigma_y0 + alpha*(Z - z_focal).^2;
     % 從 data 擷取發射/接收元件中心點
     num_elements = size(zipper_data, 1);  % 一共有幾個元件
-    ele_center = zeros(num_elements, 3);
+    ele_centers = zeros(num_elements, 3);
     for i = 1:num_elements
-        ele_center(i, :) = zipper_data(i, 2:4);  % (x1, y1, z1)
+        % 重新計算每個元件的中心 (確保使用的是相同的計算方式)
+        x_coords = [zipper_data(i,2), zipper_data(i,5), zipper_data(i,8), zipper_data(i,11)];
+        y_coords = [zipper_data(i,3), zipper_data(i,6), zipper_data(i,9), zipper_data(i,12)];
+        z_coords = [zipper_data(i,4), zipper_data(i,7), zipper_data(i,10), zipper_data(i,13)];
+        ele_centers(i, :) = [mean(x_coords), mean(y_coords), mean(z_coords)];
     end
 
     flowField = zeros(size(X));
-    for tx = tx_list
-        for rx = rx_list
+    for tx_idx_in_list = 1:length(tx_list)
+        tx = tx_list(tx_idx_in_list);    % 獲取發射元件的索引
+        tx_center = ele_centers(tx, :);  % 使用計算出的發射元件中心座標
+        tx_center(2) = element_y_center; % 將 Y 軸中心替換為當前的有效 Y 軸中心
+
+        for rx_idx_in_list = 1:length(rx_list)
+            rx = rx_list(rx_idx_in_list);    % 獲取接收元件的索引
+            rx_center = ele_centers(rx, :);  % 使用計算出的接收元件中心座標
+            rx_center(2) = element_y_center; % 將 Y 軸中心替換為當前的有效 Y 軸中心
+
             for i = 1:length(sx)
-                tx_delay = norm([sx(i) sy(i) sz(i)] - ele_center(tx,:)) / s.c;
-                rx_delay = norm([sx(i) sy(i) sz(i)] - ele_center(rx,:)) / s.c;
+                % 使用 effective_tx_center 和 effective_rx_center 計算延遲
+                tx_path_vector = [sx(i), sy(i), sz(i)] - tx_center;
+                rx_path_vector = [sx(i), sy(i), sz(i)] - rx_center;
+                tx_delay = norm(tx_path_vector) / s.c;
+                rx_delay = norm(rx_path_vector) / s.c;
                 total_delay = tx_delay + rx_delay;
-                dir_tx = (sz(i) - ele_center(tx,3)) / norm([sx(i) - ele_center(tx,1), sy(i) - ele_center(tx,2), sz(i) - ele_center(tx,3)]);
-                dir_rx = (sz(i) - ele_center(rx,3)) / norm([sx(i) - ele_center(rx,1), sy(i) - ele_center(rx,2), sz(i) - ele_center(rx,3)]);
-                directivity = (dir_tx * dir_rx)^1.0;
-                % elev_weight = exp(-(sy(i)^2) ./ (2*sigma_y.^2));
+                
+                % 使用元件中心座標計算指向性
+                norm_tx_dir_vec = norm(tx_path_vector);
+                if norm_tx_dir_vec < eps; norm_tx_dir_vec = eps; end % 避免除以零
+                dir_tx = (sz(i) - tx_center(3)) / norm_tx_dir_vec;   % 使用發射元件中心的 Z 座標
+
+                norm_rx_dir_vec = norm(rx_path_vector);
+                if norm_rx_dir_vec < eps; norm_rx_dir_vec = eps; end % 避免除以零
+                dir_rx = (sz(i) - rx_center(3)) / norm_rx_dir_vec;   % 使用接收元件中心的 Z 座標
+                directivity = dir_tx * dir_rx;
+
+                % 計算高度方向權重 (Elevation Weight)
                 depth_idx = min(max(round((sz(i) / z_size) * size(sigma_y,1)),1), size(sigma_y,1));
-                elev_weight = exp(-(sy(i)^2) ./ (2 * sigma_y(depth_idx,1)^2));
+                current_sigma_y_for_depth = sigma_y(depth_idx,1);
+
+                elev_weight = exp(-((sy(i) - tx_center(2))^2) / (2 * current_sigma_y_for_depth^2)) ... % 使用發射元件的 Y 中心
+                            .* exp(-((sy(i) - rx_center(2))^2) / (2 * current_sigma_y_for_depth^2));    % 使用接收元件的 Y 中心
+
                 phase = 2*pi*s.fx*total_delay;
-                psf = amp(i) * directivity * elev_weight .* exp(-(((X - sx(i)).^2)/(2*sigma_x^2) + ((Z - sz(i)).^2)/(2*sigma_z^2))) .* cos(2*pi*s.fx/s.c * (Z - sz(i)) + phase);
+                spatial_psf_xz = exp(-(((X - sx(i)).^2)/(2*sigma_x^2) + ((Z - sz(i)).^2)/(2*sigma_z^2)));
+                rf_cosine_term = cos(2*pi*s.fx/s.c * (Z - sz(i)) + phase);
+
+                psf = amp(i) * directivity * elev_weight .* spatial_psf_xz .* rf_cosine_term;
                 flowField = flowField + psf;
+                % tx_delay = norm([sx(i) sy(i) sz(i)] - ele_center(tx,:)) / s.c;
+                % rx_delay = norm([sx(i) sy(i) sz(i)] - ele_center(rx,:)) / s.c;
+                % total_delay = tx_delay + rx_delay;
+                % dir_tx = (sz(i) - ele_center(tx,3)) / norm([sx(i) - ele_center(tx,1), sy(i) - ele_center(tx,2), sz(i) - ele_center(tx,3)]);
+                % dir_rx = (sz(i) - ele_center(rx,3)) / norm([sx(i) - ele_center(rx,1), sy(i) - ele_center(rx,2), sz(i) - ele_center(rx,3)]);
+                % directivity = (dir_tx * dir_rx)^1.0;
+                % depth_idx = min(max(round((sz(i) / z_size) * size(sigma_y,1)),1), size(sigma_y,1));
+                % elev_weight = exp(-((sy(i) - element_y_center)^2) ./ (2 * sigma_y(depth_idx,1)^2));
+                % phase = 2*pi*s.fx*total_delay;
+                % psf = amp(i) * directivity * elev_weight .* exp(-(((X - sx(i)).^2)/(2*sigma_x^2) + ((Z - sz(i)).^2)/(2*sigma_z^2))) .* cos(2*pi*s.fx/s.c * (Z - sz(i)) + phase);
+                % flowField = flowField + psf;
             end
         end
     end
@@ -279,6 +315,7 @@ function [disp_vec, cc_max, matched_block_pos] = calculateMatchedBlock_3D(orig_i
 
     C = normxcorr2(template, search_region);
     [cc_max, imax] = max(abs(C(:)));
+    % [cc_max, imax] = max(C(:));
     [ypeak, xpeak] = ind2sub(size(C), imax);
     yoffSet = ypeak - window_h;
     xoffSet = xpeak - window_w;
