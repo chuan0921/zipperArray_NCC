@@ -1,7 +1,7 @@
 function speckleNCC_zipper()
     %% 初始化參數
     settings = struct(...
-        'num_iterations', 10, ...        % 幀數
+        'num_iterations', 15, ...        % 幀數
         'fx', 5e6, ...
         'c', 1540, ...
         'dt', 1/100, ...                 % 幀間時間 (秒)
@@ -11,7 +11,7 @@ function speckleNCC_zipper()
         'vessel_length', 14, ...
         'min_distance', 0.02, ...
         'vessel_r', 0.9, ...             % kernel 中心半徑
-        'z_size', 13, ...                % 成像深度 mm
+        'z_size', 13, ...                % 成像深度 13*10mm
         'x_size', 10, ...
         'dz', 0.05, ...
         'dx', 0.05, ...
@@ -21,28 +21,42 @@ function speckleNCC_zipper()
         'zipper_height', 6, ...
         'zipper_gap', 0.01 ...
     );
-    zipper_data = [...
-        1, settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2 - 2e-3, 0, ...
-           settings.zipper_gap/2, (-settings.zipper_height - settings.zipper_gap)/2, 0, ...
-           settings.zipper_gap/2 + settings.zipper_width, (-settings.zipper_height - settings.zipper_gap)/2, 0, ...
-           settings.zipper_width + settings.zipper_gap/2, (-settings.zipper_width - settings.zipper_gap)/2 + 2e-3, 0, ...
-           1, settings.zipper_width, settings.zipper_height + settings.zipper_gap, ...
-           0, 0, 0;  % 共18個數據 + 1個 id
-        2, settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2, 0, ...
-           settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2 - 2e-3, 0, ...
-           settings.zipper_width + settings.zipper_gap/2, (-settings.zipper_width - settings.zipper_gap)/2 + 2e-3, 0, ...
-           settings.zipper_gap/2 + settings.zipper_width, (settings.zipper_width + settings.zipper_gap)/2, 0, ...
-           1, settings.zipper_width, settings.zipper_width + settings.zipper_gap, ...
-           0, 0, 0;
-    ];
+    % zipper_data = [...
+    %     1, settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2 - 2, 0, ...
+    %        settings.zipper_gap/2, (-settings.zipper_height - settings.zipper_gap)/2, 0, ...
+    %        settings.zipper_gap/2 + settings.zipper_width, (-settings.zipper_height - settings.zipper_gap)/2, 0, ...
+    %        settings.zipper_width + settings.zipper_gap/2, (-settings.zipper_width - settings.zipper_gap)/2 + 2, 0, ...
+    %        1, settings.zipper_width, settings.zipper_height + settings.zipper_gap, ...
+    %        0, 0, 0;  % 共18個數據 + 1個 id
+    %     2, settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2, 0, ...
+    %        settings.zipper_gap/2, (settings.zipper_width + settings.zipper_gap)/2 - 2, 0, ...
+    %        settings.zipper_width + settings.zipper_gap/2, (-settings.zipper_width - settings.zipper_gap)/2 + 2, 0, ...
+    %        settings.zipper_gap/2 + settings.zipper_width, (settings.zipper_width + settings.zipper_gap)/2, 0, ...
+    %        1, settings.zipper_width, settings.zipper_width + settings.zipper_gap, ...
+    %        0, 0, 0;
+    % ];
+    zipper_data = [ ...
+    1, 0,    0.0,    0, ...     % P1_L (ele_center for Left)
+       -0.005,  1.0,    0, ...  % P2_L 
+       -0.005, -1.995,  0, ...  % P3_L 
+       -2.995, -1.995,  0, ...  % P4_L 
+       -2.995,  1.995,  0, ...  % P5_L 
+        0,      0,      0; ...  % P6_L 
+
+    2,  0,    3.01,   0, ...    % P1_R (ele_center for Right)
+        0.005,  5.005,  0, ...  % P2_R 
+        0.005,  2.01,   0, ...  % P3_R 
+        2.995,  1.015,  0, ...  % P4_R 
+        2.995,  5.005,  0, ...  % P5_R 
+        0,      0,      0       % P6_R 
+];
     rng(42);   % 固定scatter
     num_repeat = 1;    % 跑20次不同 speckle樣本
     [X, Z, x, z] = buildMeshgrid(settings);
     
-    num_moved = settings.num_iterations - 1;
-    ncc_all = zeros(num_repeat, num_moved);
-    displacement_all = zeros(num_repeat, num_moved);  % 只記錄 dy 位移
-    velocity_all = zeros(num_repeat, num_moved);
+    ncc_all = zeros(num_repeat, settings.num_iterations);
+    displacement_all = zeros(num_repeat, settings.num_iterations);  % 只記錄 dy 位移
+    velocity_all = zeros(num_repeat, settings.num_iterations);
     dy_peak = zeros(num_repeat, 1);
     
     for trial = 1:num_repeat
@@ -58,24 +72,42 @@ function speckleNCC_zipper()
         rx_list_right = 2:2:num_sub_elements;
 
         [original_image, moved_images] = generateAllImages(sx_iter, sy_iter, sz_iter, amp, tx_list_left, rx_list_left, tx_list_right, rx_list_right, settings, X, Z,zipper_data);
-
-        kernel_w = round(6 / settings.dx);
-        kernel_h = round(6 / settings.dz);
-        kx = round((settings.x_size/2 - 2) / settings.dx);
-        kz = round(6 / settings.dz);
+        [image_h, image_w] = size(original_image);
+        % 自動調整kernel size
+        frac_x = 0.6;  % 20% image size 
+        frac_z = 0.6;  
+        kernel_mm_x = frac_x * settings.x_size;  
+        kernel_mm_z = frac_z * settings.z_size;  
+    
+        % 转成像素并 clamp
+        kernel_w = min(round(kernel_mm_x / settings.dx), image_w);
+        kernel_h = min(round(kernel_mm_z / settings.dz), image_h);
+    
+        % 居中放置
+        cx = floor((image_w - kernel_w)/2) + 1;
+        cz = floor((image_h - kernel_h)/2) + 1;
+    
+        % clamp 起点
+        kx = max(1, min(cx, image_w - kernel_w + 1));
+        kz = max(1, min(cz, image_h - kernel_h + 1));
         kernel_block = [kx, kz, kx + kernel_w - 1, kz + kernel_h - 1];
         matched_positions = cell(1, settings.num_iterations);
         %--- 計算 origin_image 跟每張 moved_images 的 NCC，並找出最高的那張
-        for l = 2:settings.num_iterations
+        for l = 1:settings.num_iterations
             [disp_vec, cc_max, matched_pos] = calculateMatchedBlock_3D(original_image, moved_images{l}, kernel_block, kernel_w, kernel_h, settings, l, x, z);
-            displacement_all(trial, l-1) = disp_vec(2);
-            velocity_all(trial, l-1) = disp_vec(2) / ((l-1) * settings.dt);
-            ncc_all(trial, l-1) = cc_max;
+            if l == 1 % moved_images{1} 是 t=0 的影像，Y位移為0
+                current_dy = 0;
+            else % moved_images{l} for l>1, 粒子移動了 l-1 步
+                current_dy = (l-1) * settings.Vmax * settings.dt;
+            end
+            displacement_all(trial, l) = disp_vec(2);
+            velocity_all(trial, l) = disp_vec(2) / ((l-1) * settings.dt+ eps);
+            ncc_all(trial, l) = cc_max;
             matched_positions{l} = matched_pos;
         end
         % 取最佳相關係數對應的影像
         [best_ncc, best_idx] = max(ncc_all(trial, :));
-        best_frame = best_idx + 1;
+        best_frame = best_idx;
         best_dy    = displacement_all(trial, best_idx);
         best_vel   = velocity_all(trial, best_idx);
         fprintf('最佳匹配：第 %d 幀 (NCC=%.3f)，位移=%.3f mm，速度=%.3f mm/s\n', ...
@@ -92,11 +124,10 @@ function speckleNCC_zipper()
         fprintf("幀數: %d\n", settings.num_iterations);
         %% 驗證scatter流動位置
         fprintf('\n--- 散射粒子 Y 座標驗證 (Trial %d, Best Frame %d) ---\n', trial, best_frame);
-        [~, sy_at_best_idx_step, ~, ~] = updateScatterers(sx, sy, sz, amp, settings, best_idx);
-
+        [~, sy_at_best_idx_step, ~, ~] = updateScatterers(sx, sy, sz, amp, settings, best_idx-1);
         y_center_right_element = zipper_data(2,3); % 右元件的 Y 中心
         
-        fprintf('在 Best Frame (對應 %d 個 dt 的移動後):\n', best_idx);
+        fprintf('在 Best Frame (對應 %d 個 dt 的移動後):\n', best_idx-1);
         fprintf('  右元件 Y 中心目標: %.4f mm\n', y_center_right_element);
         fprintf('  此時散射粒子 Y 座標平均值: %.4f mm\n', mean(sy_at_best_idx_step));
         fprintf('  此時散射粒子 Y 座標標準差: %.4f mm\n', std(sy_at_best_idx_step));
@@ -122,7 +153,7 @@ function speckleNCC_zipper()
         imagesc(x, z, moved_images{i}); colormap gray; axis image; colorbar;
         title(sprintf('Frame %d', i)); hold on;
         rectangle('Position', [(x(kx)), (z(kz)), kernel_w * settings.dx, kernel_h * settings.dz], 'EdgeColor', 'g', 'LineWidth', 1.5);
-        if i > 1 && ~isempty(matched_positions{i})
+        if ~isempty(matched_positions{i})
             rect_x = matched_positions{i}(1);
             rect_z = matched_positions{i}(2);
             rectangle('Position', [rect_x, rect_z, kernel_w * settings.dx, kernel_h * settings.dz], ...
@@ -136,7 +167,7 @@ function speckleNCC_zipper()
     close(v);
     close(fig);
     implay('speckle_flow.avi');
-
+    
      %% 原始影像與 kernel 標示
     figure('Name', 'Original Image');
     imagesc(x, z, original_image); colormap gray; colorbar;
@@ -176,9 +207,10 @@ function [sx, sy, sz, amp] = updateScatterers(sx, sy, sz, amp, s ,step)
     if nargin < 6
         step = 1;  % 預設每次只移動一幀
     end
-    vy = s.Vmax * ones(size(sy));          % 每個點都以最大速度往 y 方向移動
+    % vy = s.Vmax * ones(size(sy));          % 每個點都以最大速度往 y 方向移動之後要改層流
+    vy = s.Vmax;  
     sy = sy + vy * s.dt * step;            % 更新位置：y = y + v * dt * step
-
+    
     % 保留在成像區域內的 scatterers
     inside_idx = (abs(sx) <= s.x_size/2) & (abs(sy) <= s.zipper_height/2) & (sz <= s.z_size);
     sx = sx(inside_idx);       
@@ -205,23 +237,27 @@ function [original_image, moved_images] = generateAllImages(sx, sy, sz, amp, tx_
     image_w = size(Z, 2);
     moved_images = cell(1, settings.num_iterations);
 
-    % 左元件收 Frame 1（原始影像）
-    fprintf('模擬影像第 1 幀（左元件）\n');
+    % 左元件收 Frame 1 (t=0)
+    fprintf('simulate origin image（左元件）\n');
     img_left = generateZipperImage(sx, sy, sz, amp, tx_list_left, rx_list_left, settings, X, Z, zipper_data);
     original_image = imresize(img_left, [image_h, image_w]);
-    moved_images{1} = original_image;
+    
+    % 右元件收 Frame 2 (t=0)
+    fprintf('simulate moved image 1（右元件）\n');
+    img_right_t0 = generateZipperImage(sx, sy, sz, amp, tx_list_right, rx_list_right, settings, X, Z, zipper_data);
+    moved_images{1} = imresize(img_right_t0, [image_h, image_w]);
     % 右元件收後續幀（模擬 speckle 往 y 軸移動）
     for iter = 2:settings.num_iterations
-        fprintf('模擬影像第 %d 幀（右元件）\n', iter);
+        fprintf('simulate moved image %d（右元件）\n', iter);
         [sx, sy, sz, amp] = updateScatterers(sx, sy, sz, amp, settings, iter - 1);
         img_right = generateZipperImage(sx, sy, sz, amp, tx_list_right, rx_list_right, settings, X, Z, zipper_data);
         moved_images{iter} = imresize(img_right, [image_h, image_w]);
     end
 end
 function img = generateZipperImage(sx, sy, sz, amp, tx_list, rx_list, s, X, Z, zipper_data)
-    sigma_x = 0.3; sigma_z = 0.3; sigma_y0 = 0.5; alpha = 0.05;
+    sigma_x = 0.3; sigma_z = 0.3; sigma_y0 = 0.2; alpha = 0.05;
     z_size = max(Z(:)); z_focal = z_size / 2;
-    sigma_y = sigma_y0 + alpha*(Z - z_focal).^2;
+    sigma_y = sigma_y0 + alpha*(Z - z_focal).^4;
     % 從 data 擷取發射/接收元件中心點
     num_elements = size(zipper_data, 1);  % 一共有幾個元件
     ele_center = zeros(num_elements, 3);
@@ -231,6 +267,7 @@ function img = generateZipperImage(sx, sy, sz, amp, tx_list, rx_list, s, X, Z, z
 
     flowField = zeros(size(X));
     for tx = tx_list
+        active_element_y_center = ele_center(tx, 3);
         for rx = rx_list
             for i = 1:length(sx)
                 tx_delay = norm([sx(i) sy(i) sz(i)] - ele_center(tx,:)) / s.c;
@@ -239,11 +276,13 @@ function img = generateZipperImage(sx, sy, sz, amp, tx_list, rx_list, s, X, Z, z
                 dir_tx = (sz(i) - ele_center(tx,3)) / norm([sx(i) - ele_center(tx,1), sy(i) - ele_center(tx,2), sz(i) - ele_center(tx,3)]);
                 dir_rx = (sz(i) - ele_center(rx,3)) / norm([sx(i) - ele_center(rx,1), sy(i) - ele_center(rx,2), sz(i) - ele_center(rx,3)]);
                 directivity = (dir_tx * dir_rx)^1.0;
-                % elev_weight = exp(-(sy(i)^2) ./ (2*sigma_y.^2));
                 depth_idx = min(max(round((sz(i) / z_size) * size(sigma_y,1)),1), size(sigma_y,1));
-                elev_weight = exp(-(sy(i)^2) ./ (2 * sigma_y(depth_idx,1)^2));
+                % elev_weight = exp(-(sy(i)^2) ./ (2 * sigma_y(depth_idx,1)^2));
+                elev_weight = exp(-((sy(i) - active_element_y_center)^2) ./ (2 * sigma_y(depth_idx,1)^2));
+                
                 phase = 2*pi*s.fx*total_delay;
                 psf = amp(i) * directivity * elev_weight .* exp(-(((X - sx(i)).^2)/(2*sigma_x^2) + ((Z - sz(i)).^2)/(2*sigma_z^2))) .* cos(2*pi*s.fx/s.c * (Z - sz(i)) + phase);
+                % psf = amp(i) * directivity * elev_weight .* exp(-(((X - sx(i)).^2)/(2*sigma_x^2) + ((Z - sz(i)).^2)/(2*sigma_z^2)));
                 flowField = flowField + psf;
             end
         end
@@ -257,7 +296,7 @@ end
 function [disp_vec, cc_max, matched_block_pos] = calculateMatchedBlock_3D(orig_img, moved_img, k_block, window_w, window_h, s, iter, x, z)
     x0 = k_block(1); z0 = k_block(2);
     template = orig_img(z0:z0+window_h-1, x0:x0+window_w-1);
-
+    
     if std(template(:)) == 0
         cc_max = 0; disp_vec = [0;0;0]; matched_block_pos = [x(x0), z(z0)]; return;
     end
@@ -293,8 +332,9 @@ function [disp_vec, cc_max, matched_block_pos] = calculateMatchedBlock_3D(orig_i
     dz_mm = (matched_z0 - z0) * dz;
     dy_mm = (iter - 1) * s.Vmax * s.dt;
 
-    disp_vec = [dx_mm; dy_mm; dz_mm];
+    disp_vec = [0; dy_mm; 0];
     matched_block_pos = [x(matched_x0), z(matched_z0)];
+    
     % debug
     % 1) pad 與 search size
     fprintf('Frame %d: pad_x=%d, pad_z=%d, search=%dx%d px\n', ...
