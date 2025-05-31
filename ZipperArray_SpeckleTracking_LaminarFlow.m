@@ -61,22 +61,22 @@ num_scatterers = 3000;
 y_size = 5;          % Scatterers distribution in y (the range)
 sigma_y = 0.3;       % elevational beamwidth (mm)
 p_comp = 1; 
+     
+% r = 0.9e-3;         % 血管徑向距離 [0.9,1.6,2.6,4.4] m
+R = 5;                % 血管半徑 mm
+Vmax = 10;            % 最大速度（mm/s）
+dt = 1 / 100;         % 幀率 100 fps
+% v_profile = Vmax * (1 - (r./R).^2);  % 單位 mm/s
 
-r = 0.9e-3;            % 血管徑向距離 m
-R = 5e-3;              % 血管半徑 m
-Vmax = 10;          % 最大速度（mm/s）
-dt = 1 / 100;       % 幀率 100 fps
-v_profile = Vmax * (1 - (r./R).^2);  % 單位 mm/s
-
-num_frames = 50;            % Number of frames for dynamic simulation
-% y_move_speed = 0.07e-3;        % Movement per frame (m)
-y_move_speed = v_profile * dt * 1e-3;
+num_frames = 50;            % Number of frames for dynamic simulation      
+% y_move_speed = v_profile * dt * 1e-3;    % Movement per frame (m)
 window_size = 128;          % Window size for correlation calculation
 step_size = 4;              % Step size for correlation windows
 
 % Create array to store max correlation coefficients for each frame across all iterations
 num_iterations = 1;
 all_max_cc = zeros(num_iterations, num_frames);
+all_V_rep = zeros(1, num_iterations);
 
 % Create figure for line plot
 fig_line = figure('Name', 'Average Max CC vs Frame');
@@ -92,6 +92,19 @@ for iter = 1:num_iterations
     z_scatter = z_size * rand(num_scatterers, 1);
     y_scatter = y_size * rand(num_scatterers, 1) - y_size/2;
     amplitudes = randn(num_scatterers, 1) .* (1 + 0.5*rand(num_scatterers, 1));
+
+    % vessel center
+    vessel_cx = 0;
+    vessel_cz = z_size / 2;
+    % each scatter's radial position
+    r = sqrt((x_scatter - vessel_cx).^2 + (z_scatter - vessel_cz).^2);
+    % laminar flow 
+    v_profile = Vmax * (1 - (r ./ R).^2);
+    v_profile(r > R) = 0; % ensure only consider the scatterer in the vessel
+    V_rep_iter = mean(v_profile(r<=R));    % 算平均速度 mm/s
+    all_V_rep(iter) = V_rep_iter;
+    % y direction displacement
+    y_move_speed = v_profile * dt * 1e-3;
     
     % ------------------------------
     % (1) Reference image (Odd Tx/Odd Rx)
@@ -136,7 +149,6 @@ for iter = 1:num_iterations
             composite_image_ref = composite_image_ref + sub_image;
         end
     end
-    
     env_ref = abs(hilbert(composite_image_ref));
     env_norm_ref = env_ref / max(env_ref(:));
     ref_image = max(20*log10(env_norm_ref), -30);
@@ -167,7 +179,6 @@ for iter = 1:num_iterations
     for frame = 1:num_frames
         % Update scatter moving: move in negative y direction
         y_scatter = y_scatter + y_move_speed;
-        % y_scatter = y_scatter + (v_profile * dt);
        
         % Print element centers only in the first iteration
         if iter == 1
@@ -229,7 +240,8 @@ for iter = 1:num_iterations
         % Store max correlation coefficient for this frame and iteration
         all_max_cc(iter, frame) = max_cc;
         %all_max_cc(iter, frame) = mean_cc;
-
+        
+        
         % Print max CC for each frame only in the first iteration
         if iter == 1
             fprintf('Frame %d: Max Correlation Coefficient = %.4f\n', frame, max_cc);
@@ -253,11 +265,24 @@ for iter = 1:num_iterations
             % Save the current frame image in cell array
             frameImages{frame} = even_image;
         end
-        
-        % Update even element centers: move in negative y direction
-        % moving_centers(even_idx,2) = moving_centers(even_idx,2) - y_move_speed;
     end
-    
+    % figure each scatterer velocity
+    if iter == 1
+        % 3D
+        figure('Name', '3D Scatterer Velocity Profile');
+        x_plot_mm = (x_scatter - vessel_cx) ; 
+        z_plot_mm = (z_scatter - vessel_cz);
+        scatter3(x_plot_mm, z_plot_mm, v_profile, 30, v_profile, 'filled');
+        xlabel('相對於血管中心的 X 位置 (mm)');
+        ylabel('相對於血管中心的 Z 位置 (mm)');
+        zlabel('速度 (mm/s)');
+        title(sprintf('三維層流速度剖面 (Vmax = %.1f mm/s, R = %.1f mm)', Vmax, R));
+        cb = colorbar; % 顯示顏色條
+        ylabel(cb, '速度 (mm/s)');
+        axis equal; % 使得 x-z 平面上的圓形看起來更像圓形
+        view(-35, 45); % 調整視角以便觀察，您可以嘗試不同的角度
+        grid on;
+    end
     % Print iteration progress
     fprintf('Completed iteration %d/%d\n', iter, num_iterations);
 end
@@ -274,14 +299,21 @@ avg_max_cc = mean(all_max_cc, 1);
 fprintf('\n=============================================\n');
 fprintf('Average Max Correlation Coefficient for Each Frame (across %d iterations):\n', num_iterations);
 for frame = 1:num_frames
-    fprintf('Frame %d: Avg Max CC = %.4f, displacement= %.4f\n', frame, avg_max_cc(frame), (1:num_frames) * y_move_speed * 1e3);
+    fprintf('Frame %d: Avg Max CC = %.4f\n', frame, avg_max_cc(frame));
 end
+% ------------------------------
+% Find max CC and frame --> using mean velocity
+% ------------------------------
+V_rep = mean(all_V_rep);    % mm/s
+[peak_cc_value, peak_frame_index] = max(avg_max_cc);
+fprintf('平均最大相關係數在第 %d 幀達到峰值，其值為: %.4f\n', peak_frame_index, peak_cc_value);
+displacement_at_peak_cc_mm = Vmax * dt * peak_frame_index;
+fprintf('在相關係數峰值幀 (第 %d 幀)，平均流速為 %.3f mm/s，累積位移為: %.4f mm\n', peak_frame_index, V_rep, displacement_at_peak_cc_mm);
 
 % ------------------------------
 % Plot average max CC vs frame number with accumulated displacement
 % ------------------------------
 figure(fig_line);
-accumulated_displacement = (1:num_frames) * y_move_speed * 1e3; % Convert to mm
 plot(1:num_frames, avg_max_cc, 'o-', 'MarkerSize', 3, 'MarkerFaceColor', 'b', 'LineWidth', 2);
 xlabel('Frame Number');
 ylabel('Average Max Correlation Coefficient');
@@ -289,16 +321,18 @@ title(sprintf('Average Max CC vs Frame (%d Iterations)', num_iterations));
 grid on;
 
 % Add secondary x-axis for accumulated displacement
+
+accumulated_displacement = (1:num_frames) .* y_move_speed * 1e3; % Convert to mm
 ax1 = gca;
-ax2 = axes('Position', get(ax1, 'Position'), 'XAxisLocation', 'top', 'YAxisLocation', 'right', 'Color', 'none', 'XColor', 'r', 'YColor', 'none');
-line(accumulated_displacement, avg_max_cc, 'Parent', ax2, 'Color', 'r', 'LineStyle', '-', 'Marker', 'x', 'LineWidth', 2);
-xlabel(ax2, 'Accumulated Displacement (mm)', 'Color', 'r');
-xlim(ax2, [min(accumulated_displacement), max(accumulated_displacement)]);
+% ax2 = axes('Position', get(ax1, 'Position'), 'XAxisLocation', 'top', 'YAxisLocation', 'right', 'Color', 'none', 'XColor', 'r', 'YColor', 'none');
+% line(accumulated_displacement, avg_max_cc, 'Parent', ax2, 'Color', 'r', 'LineStyle', '-', 'Marker', 'x', 'LineWidth', 2);
+% xlabel(ax2, 'Accumulated Displacement (mm)', 'Color', 'r');
+% xlim(ax2, [min(accumulated_displacement), max(accumulated_displacement)]);
 xlim(ax1, [1, num_frames]);
 
 % Create a legend
 legend(ax1, 'Avg Max CC vs Frame');
-legend(ax2, 'Avg Max CC vs Displacement');
+% legend(ax2, 'Avg Max CC vs Displacement');
 
 % ------------------------------
 % Plot individual frame images from the first iteration
@@ -331,11 +365,29 @@ grid on;
 legend('Individual Iterations', 'Average', 'Location', 'southwest');
 
 % ------------------------------
-% Visualize Velocity Profile of All Scatterers (Laminar Flow)
+% compare with odd image and maxCC even image
 % ------------------------------
+best_even = frameImages{peak_frame_index};  
+ref_img  = ref_image;
 
+figure('Name','Reference vs. Best-Matched Frame');
+subplot(1,2,1);
+imagesc(x, z, ref_img);
+colormap(gray); axis image off;
+title('Odd-element Reference');
+subplot(1,2,2);
+imagesc(x, z, best_even);
+colormap(gray); axis image off;
+title(sprintf('Even-element Frame %d (Max CC)', peak_frame_index));
+
+diff_img = best_even - ref_img;
+figure('Name','Difference Image');
+imagesc(x, z, diff_img);
+colormap(gray); axis image off;
+title('Even – Odd Difference');
+colorbar;
 %% cc function
-function [corr_map, best_pos] = calculateCorrelationMap(orig_img, rotated_img, window_size, step_size)
+function [corr_map, best_pos] = calculateCorrelationMap(orig_img, moved_img, window_size, step_size)
     [h, w] = size(orig_img);
     num_windows_y = floor((h - window_size)/step_size) + 1;
     num_windows_x = floor((w - window_size)/step_size) + 1;
@@ -351,7 +403,7 @@ function [corr_map, best_pos] = calculateCorrelationMap(orig_img, rotated_img, w
             x_start = (j-1)*step_size + 1;
             x_end = x_start + window_size - 1;
             win1 = orig_img(y_start:y_end, x_start:x_end);
-            win2 = rotated_img(y_start:y_end, x_start:x_end);
+            win2 = moved_img(y_start:y_end, x_start:x_end);
             R = corrcoef(win1(:), win2(:));
             corr_map(i,j) = R(1,2);
             if R(1,2) > max_cc
